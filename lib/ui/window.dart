@@ -262,10 +262,13 @@ abstract class FlutterView {
   ///   scheduling of frames.
   /// * [RendererBinding], the Flutter framework class which manages layout and
   ///   painting.
-  void render(Scene scene) => _render(scene);
+  void render(Scene scene, {Duration? fallbackVsyncTargetTime}) =>
+      _render(scene, fallbackVsyncTargetTime != null
+          ? fallbackVsyncTargetTime.inMicroseconds * 1000
+          : -1);
 
-  @FfiNative<Void Function(Pointer<Void>)>('PlatformConfigurationNativeApi::Render')
-  external static void _render(Scene scene);
+  @FfiNative<Void Function(Pointer<Void>, Int64)>('PlatformConfigurationNativeApi::Render')
+  external static void _render(Scene scene, int fallbackVsyncTargetTime);
 
   /// Change the retained semantics data about this [FlutterView].
   ///
@@ -674,7 +677,9 @@ class SingletonFlutterWindow extends FlutterWindow {
   ///
   /// * [SchedulerBinding], the Flutter framework class which manages the
   ///   scheduling of frames.
-  void scheduleFrame() => platformDispatcher.scheduleFrame();
+  void scheduleFrame({Duration? forceDirectlyCallNextVsyncTargetTime}) =>
+      platformDispatcher.scheduleFrame(
+          forceDirectlyCallNextVsyncTargetTime: forceDirectlyCallNextVsyncTargetTime);
 
   /// Whether the user has requested that [updateSemantics] be called when
   /// the semantic contents of window changes.

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "flutter/runtime/runtime_controller.h"
+#include <shell/common/shell.h>
 
 #include <utility>
 
@@ -304,13 +305,19 @@ std::string RuntimeController::DefaultRouteName() {
 }
 
 // |PlatformConfigurationClient|
-void RuntimeController::ScheduleFrame() {
-  client_.ScheduleFrame();
+void RuntimeController::ScheduleFrame(
+    std::optional<fml::TimePoint> force_directly_call_next_vsync_target_time) {
+  client_.ScheduleFrame(true, force_directly_call_next_vsync_target_time);
+}
+
+Dart_Handle RuntimeController::PointerDataPacketStorageReadPendingAndClear() {
+  return client_.PointerDataPacketStorageReadPendingAndClear();
 }
 
 // |PlatformConfigurationClient|
-void RuntimeController::Render(Scene* scene) {
-  client_.Render(scene->takeLayerTree());
+void RuntimeController::Render(Scene* scene,
+                               fml::TimePoint fallback_vsync_target_time) {
+  client_.Render(scene->takeLayerTree(), fallback_vsync_target_time);
 }
 
 // |PlatformConfigurationClient|

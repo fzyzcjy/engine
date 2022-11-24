@@ -437,11 +437,19 @@ std::string Engine::DefaultRouteName() {
   return "/";
 }
 
-void Engine::ScheduleFrame(bool regenerate_layer_tree) {
-  animator_->RequestFrame(regenerate_layer_tree);
+void Engine::ScheduleFrame(
+    bool regenerate_layer_tree,
+    std::optional<fml::TimePoint> force_directly_call_next_vsync_target_time) {
+  animator_->RequestFrame(regenerate_layer_tree,
+                          force_directly_call_next_vsync_target_time);
 }
 
-void Engine::Render(std::shared_ptr<flutter::LayerTree> layer_tree) {
+Dart_Handle Engine::PointerDataPacketStorageReadPendingAndClear() {
+  return PointerDataPacketStorage::ReadPendingAndClearStatic();
+}
+
+void Engine::Render(std::shared_ptr<flutter::LayerTree> layer_tree,
+                    fml::TimePoint fallback_vsync_target_time) {
   if (!layer_tree) {
     return;
   }
@@ -452,7 +460,7 @@ void Engine::Render(std::shared_ptr<flutter::LayerTree> layer_tree) {
     return;
   }
 
-  animator_->Render(std::move(layer_tree));
+  animator_->Render(std::move(layer_tree), fallback_vsync_target_time);
 }
 
 void Engine::UpdateSemantics(SemanticsNodeUpdates update,

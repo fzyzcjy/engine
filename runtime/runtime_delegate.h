@@ -23,9 +23,15 @@ class RuntimeDelegate {
  public:
   virtual std::string DefaultRouteName() = 0;
 
-  virtual void ScheduleFrame(bool regenerate_layer_tree = true) = 0;
+  virtual void ScheduleFrame(
+      bool regenerate_layer_tree = true,
+      std::optional<fml::TimePoint> force_directly_call_next_vsync_target_time =
+          std::nullopt) = 0;
 
-  virtual void Render(std::shared_ptr<flutter::LayerTree> layer_tree) = 0;
+  virtual Dart_Handle PointerDataPacketStorageReadPendingAndClear() = 0;
+
+  virtual void Render(std::shared_ptr<flutter::LayerTree> layer_tree,
+                      fml::TimePoint fallback_vsync_target_time) = 0;
 
   virtual void UpdateSemantics(SemanticsNodeUpdates update,
                                CustomAccessibilityActionUpdates actions) = 0;

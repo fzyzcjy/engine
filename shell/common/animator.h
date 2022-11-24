@@ -52,9 +52,14 @@ class Animator final {
 
   ~Animator();
 
-  void RequestFrame(bool regenerate_layer_tree = true);
+  void RequestFrame(
+      bool regenerate_layer_tree = true,
+      std::optional<fml::TimePoint> force_directly_call_next_vsync_target_time =
+          std::nullopt);
 
-  void Render(std::shared_ptr<flutter::LayerTree> layer_tree);
+  void Render(std::shared_ptr<flutter::LayerTree> layer_tree,
+              fml::TimePoint fallback_vsync_target_time =
+                  fml::TimePoint::FromTicks(-1));
 
   const std::weak_ptr<VsyncWaiter> GetVsyncWaiter() const;
 
@@ -89,7 +94,10 @@ class Animator final {
   void DrawLastLayerTree(
       std::unique_ptr<FrameTimingsRecorder> frame_timings_recorder);
 
-  void AwaitVSync();
+  void AwaitVSync(
+      uint64_t flow_id,
+      std::optional<fml::TimePoint> force_directly_call_next_vsync_target_time,
+      int curr_await_vsync_id);
 
   // Clear |trace_flow_ids_| if |frame_scheduled_| is false.
   void ScheduleMaybeClearTraceFlowIds();
@@ -102,13 +110,19 @@ class Animator final {
   uint64_t frame_request_number_ = 1;
   fml::TimeDelta dart_frame_deadline_;
   std::shared_ptr<LayerTreePipeline> layer_tree_pipeline_;
-  fml::Semaphore pending_frame_semaphore_;
+  //  fml::Semaphore pending_frame_semaphore_; // NOTE MODIFIED replaced
   LayerTreePipeline::ProducerContinuation producer_continuation_;
   bool regenerate_layer_tree_ = false;
   bool frame_scheduled_ = false;
   SkISize last_layer_tree_size_ = {0, 0};
   std::deque<uint64_t> trace_flow_ids_;
   bool has_rendered_ = false;
+
+  // NOTE MODIFIED add (hack)
+  std::optional<fml::TimePoint> last_begin_frame_recorded_frame_target_time_,
+      last_begin_frame_ending_time_;
+  std::atomic<std::optional<int>> pending_await_vsync_id_{std::nullopt};
+  std::atomic<int> next_await_vsync_id_{1000};
 
   fml::WeakPtrFactory<Animator> weak_factory_;
 

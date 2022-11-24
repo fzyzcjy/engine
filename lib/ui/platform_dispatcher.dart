@@ -715,10 +715,41 @@ class PlatformDispatcher {
   ///
   ///  * [SchedulerBinding], the Flutter framework class which manages the
   ///    scheduling of frames.
-  void scheduleFrame() => _scheduleFrame();
+  void scheduleFrame({Duration? forceDirectlyCallNextVsyncTargetTime}) =>
+      _scheduleFrame(forceDirectlyCallNextVsyncTargetTime == null
+          ? -1
+          : forceDirectlyCallNextVsyncTargetTime.inMicroseconds);
 
-  @FfiNative<Void Function()>('PlatformConfigurationNativeApi::ScheduleFrame')
-  external static void _scheduleFrame();
+  @FfiNative<Void Function(Int64)>('PlatformConfigurationNativeApi::ScheduleFrame')
+  external static void _scheduleFrame(int forceDirectlyCallNextVsyncTargetTime);
+
+  LastVsyncInfo lastVsyncInfo() {
+    // final List<int> raw = _lastVsyncInfo();
+    // return LastVsyncInfo(
+    //   vsyncTargetTime: Duration(microseconds: raw[0]),
+    //   diffDateTimeTimePoint: raw[1],
+    // );
+    throw Exception('temporarily removed');
+  }
+
+  // // prototype, should not really name/place here
+  // @FfiNative<Handle Function()>('LastVsyncInfo::ReadToDart')
+  // external static List<int> _lastVsyncInfo();
+
+  static PointerDataPacket pointerDataPacketStorageReadPendingAndClear() {
+    final raw = _pointerDataPacketStorageReadPendingAndClearStatic();
+    return _unpackPointerDataPacket(raw);
+  }
+
+  // prototype, should not really name/place here
+  @FfiNative<Handle Function()>('PlatformConfigurationNativeApi::PointerDataPacketStorageReadPendingAndClear')
+  external static ByteData _pointerDataPacketStorageReadPendingAndClearStatic();
+
+  bool notifyIdle(Duration deadline) => _notifyIdle(deadline.inMicroseconds);
+
+  // prototype, should not really name/place here
+  @FfiNative<Bool Function(Int64)>('PlatformConfigurationNativeApi::NotifyIdle')
+  external static bool _notifyIdle(int deadline);
 
   /// Additional accessibility features that may be enabled by the platform.
   AccessibilityFeatures get accessibilityFeatures => configuration.accessibilityFeatures;
@@ -2184,4 +2215,14 @@ enum DartPerformanceMode {
   /// Optimize for low memory, at the expensive of throughput and latency by more
   /// frequently performing work.
   memory,
+}
+
+class LastVsyncInfo {
+  const LastVsyncInfo({required this.vsyncTargetTime, required this.diffDateTimeTimePoint});
+
+  final Duration vsyncTargetTime;
+  final int diffDateTimeTimePoint;
+
+  @override
+  String toString() => 'LastVsyncInfo{vsyncTargetTime: $vsyncTargetTime, diffDateTimeTimePoint: $diffDateTimeTimePoint}';
 }

@@ -4,6 +4,7 @@
 
 #include "flutter/lib/ui/window/platform_configuration.h"
 
+#include <shell/common/shell.h>
 #include <cstring>
 
 #include "flutter/lib/ui/compositing/scene.h"
@@ -205,15 +206,27 @@ void PlatformConfiguration::BeginFrame(fml::TimePoint frameTime,
 
   int64_t microseconds = (frameTime - fml::TimePoint()).ToMicroseconds();
 
+  FML_DLOG(INFO)
+      << "hi PlatformConfiguration::BeginFrame call dart begin_frame_ start";
   tonic::CheckAndHandleError(
       tonic::DartInvoke(begin_frame_.Get(), {
                                                 Dart_NewInteger(microseconds),
                                                 Dart_NewInteger(frame_number),
                                             }));
+  FML_DLOG(INFO)
+      << "hi PlatformConfiguration::BeginFrame call dart begin_frame_ end";
 
+  FML_DLOG(INFO)
+      << "hi PlatformConfiguration::BeginFrame call FlushMicrotasksNow start";
   UIDartState::Current()->FlushMicrotasksNow();
+  FML_DLOG(INFO)
+      << "hi PlatformConfiguration::BeginFrame call FlushMicrotasksNow end";
 
+  FML_DLOG(INFO)
+      << "hi PlatformConfiguration::BeginFrame call dart draw_frame_ start";
   tonic::CheckAndHandleError(tonic::DartInvokeVoid(draw_frame_.Get()));
+  FML_DLOG(INFO)
+      << "hi PlatformConfiguration::BeginFrame call dart draw_frame_ end";
 }
 
 void PlatformConfiguration::ReportTimings(std::vector<int64_t> timings) {
@@ -272,9 +285,12 @@ void PlatformConfiguration::CompletePlatformMessageResponse(
   response->Complete(std::make_unique<fml::DataMapping>(std::move(data)));
 }
 
-void PlatformConfigurationNativeApi::Render(Scene* scene) {
+void PlatformConfigurationNativeApi::Render(
+    Scene* scene,
+    int64_t fallback_vsync_target_time) {
   UIDartState::ThrowIfUIOperationsProhibited();
-  UIDartState::Current()->platform_configuration()->client()->Render(scene);
+  UIDartState::Current()->platform_configuration()->client()->Render(
+      scene, fml::TimePoint::FromTicks(fallback_vsync_target_time));
 }
 
 void PlatformConfigurationNativeApi::SetNeedsReportTimings(bool value) {
@@ -400,9 +416,36 @@ Dart_Handle PlatformConfigurationNativeApi::GetPersistentIsolateData() {
                                      persistent_isolate_data->GetSize());
 }
 
-void PlatformConfigurationNativeApi::ScheduleFrame() {
+void PlatformConfigurationNativeApi::ScheduleFrame(
+    int64_t force_directly_call_next_vsync_target_time_microseconds) {
+  std::optional<fml::TimePoint> force_directly_call_next_vsync_target_time =
+      force_directly_call_next_vsync_target_time_microseconds <= 0
+          ? std::nullopt
+          : std::optional(fml::TimePoint::FromTicks(
+                force_directly_call_next_vsync_target_time_microseconds *
+                1000));
+
   UIDartState::ThrowIfUIOperationsProhibited();
-  UIDartState::Current()->platform_configuration()->client()->ScheduleFrame();
+  UIDartState::Current()->platform_configuration()->client()->ScheduleFrame(
+      force_directly_call_next_vsync_target_time);
+}
+
+bool PlatformConfigurationNativeApi::NotifyIdle(int64_t deadline_microseconds) {
+  fml::TimeDelta deadline =
+      fml::TimePoint::FromTicks(deadline_microseconds * 1000).ToEpochDelta();
+
+  UIDartState::ThrowIfUIOperationsProhibited();
+  return UIDartState::Current()->platform_configuration()->client()->NotifyIdle(
+      deadline);
+}
+
+Dart_Handle
+PlatformConfigurationNativeApi::PointerDataPacketStorageReadPendingAndClear() {
+  UIDartState::ThrowIfUIOperationsProhibited();
+  return UIDartState::Current()
+      ->platform_configuration()
+      ->client()
+      ->PointerDataPacketStorageReadPendingAndClear();
 }
 
 void PlatformConfigurationNativeApi::UpdateSemantics(SemanticsUpdate* update) {

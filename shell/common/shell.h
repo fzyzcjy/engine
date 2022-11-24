@@ -43,6 +43,27 @@
 
 namespace flutter {
 
+// in real impl, should give Enable/Disable methods, so we can disable
+// it when not needed
+class PointerDataPacketStorage {
+ public:
+  PointerDataPacketStorage() {}
+
+  static PointerDataPacketStorage& Instance();
+  static Dart_Handle ReadPendingAndClearStatic();
+
+  int64_t AddPending(const PointerDataPacket& packet);
+  void RemovePending(int64_t id);
+  Dart_Handle ReadPendingAndClear();
+
+ private:
+  std::mutex mutex_;
+  int next_id_{0};
+  std::map<int64_t, PointerDataPacket> pending_packets_;
+
+  FML_DISALLOW_COPY_ASSIGN_AND_MOVE(PointerDataPacketStorage);
+};
+
 /// Error exit codes for the Dart isolate.
 enum class DartErrorCode {
   /// No error has occurred.

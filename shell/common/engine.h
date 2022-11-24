@@ -760,7 +760,13 @@ class Engine final : public RuntimeDelegate, PointerDataDispatcher::Delegate {
   void SetAccessibilityFeatures(int32_t flags);
 
   // |RuntimeDelegate|
-  void ScheduleFrame(bool regenerate_layer_tree) override;
+  void ScheduleFrame(
+      bool regenerate_layer_tree,
+      std::optional<fml::TimePoint> force_directly_call_next_vsync_target_time =
+          std::nullopt) override;
+
+  // |RuntimeDelegate|
+  Dart_Handle PointerDataPacketStorageReadPendingAndClear() override;
 
   /// Schedule a frame with the default parameter of regenerating the layer
   /// tree.
@@ -892,7 +898,8 @@ class Engine final : public RuntimeDelegate, PointerDataDispatcher::Delegate {
   std::string DefaultRouteName() override;
 
   // |RuntimeDelegate|
-  void Render(std::shared_ptr<flutter::LayerTree> layer_tree) override;
+  void Render(std::shared_ptr<flutter::LayerTree> layer_tree,
+              fml::TimePoint fallback_vsync_target_time) override;
 
   // |RuntimeDelegate|
   void UpdateSemantics(SemanticsNodeUpdates update,

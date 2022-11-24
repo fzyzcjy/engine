@@ -358,7 +358,7 @@ class RuntimeController : public PlatformConfigurationClient {
   ///
   /// @return     If the idle notification was forwarded to the running isolate.
   ///
-  virtual bool NotifyIdle(fml::TimeDelta deadline);
+  virtual bool NotifyIdle(fml::TimeDelta deadline) override;
 
   //----------------------------------------------------------------------------
   /// @brief      Notify the Dart VM that the attached flutter view has been
@@ -614,10 +614,13 @@ class RuntimeController : public PlatformConfigurationClient {
   std::string DefaultRouteName() override;
 
   // |PlatformConfigurationClient|
-  void ScheduleFrame() override;
+  void ScheduleFrame(std::optional<fml::TimePoint>
+                         force_directly_call_next_vsync_target_time) override;
+
+  Dart_Handle PointerDataPacketStorageReadPendingAndClear() override;
 
   // |PlatformConfigurationClient|
-  void Render(Scene* scene) override;
+  void Render(Scene* scene, fml::TimePoint fallback_vsync_target_time) override;
 
   // |PlatformConfigurationClient|
   void UpdateSemantics(SemanticsUpdate* update) override;

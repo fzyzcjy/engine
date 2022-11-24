@@ -42,7 +42,9 @@ bool AndroidChoreographer::ShouldUseNDKChoreographer() {
             "AChoreographer_postFrameCallback");
   }
 #endif
-  if (get_instance_fn && post_frame_callback_fn) {
+  // NOTE HACK forcefully disable ndk mode
+  // https://github.com/fzyzcjy/yplusplus/issues/5822#issuecomment-1257101128
+  if (false /* NOTE HACK! */ && get_instance_fn && post_frame_callback_fn) {
     AChoreographer_getInstance = get_instance_fn.value();
     AChoreographer_postFrameCallback = post_frame_callback_fn.value();
     use_ndk_choreographer = true;

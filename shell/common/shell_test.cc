@@ -208,7 +208,8 @@ void ShellTest::PumpOneFrame(Shell* shell,
         if (builder) {
           builder(root_layer);
         }
-        runtime_delegate->Render(std::move(layer_tree));
+        runtime_delegate->Render(std::move(layer_tree),
+                                 fml::TimePoint::FromTicks(-1));
         latch.Signal();
       });
   latch.Wait();

@@ -15,7 +15,7 @@ abstract class FlutterView {
   WindowPadding get systemGestureInsets => viewConfiguration.systemGestureInsets;
   WindowPadding get padding => viewConfiguration.padding;
   List<DisplayFeature> get displayFeatures => viewConfiguration.displayFeatures;
-  void render(Scene scene) => platformDispatcher.render(scene, this);
+  void render(Scene scene, {Duration? fallbackVsyncTargetTime}) => platformDispatcher.render(scene, this);
   void updateSemantics(SemanticsUpdate update) => platformDispatcher.updateSemantics(update);
 }
 
@@ -101,10 +101,10 @@ abstract class SingletonFlutterWindow extends FlutterWindow {
 
   String get defaultRouteName => platformDispatcher.defaultRouteName;
 
-  void scheduleFrame() => platformDispatcher.scheduleFrame();
+  void scheduleFrame({Duration? forceDirectlyCallNextVsyncTargetTime}) => platformDispatcher.scheduleFrame(forceDirectlyCallNextVsyncTargetTime: forceDirectlyCallNextVsyncTargetTime);
 
   @override
-  void render(Scene scene) => platformDispatcher.render(scene, this);
+  void render(Scene scene, {Duration? fallbackVsyncTargetTime}) => platformDispatcher.render(scene, this);
 
   bool get semanticsEnabled => platformDispatcher.semanticsEnabled;
 

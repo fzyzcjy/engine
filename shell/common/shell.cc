@@ -35,6 +35,47 @@
 
 namespace flutter {
 
+PointerDataPacketStorage& PointerDataPacketStorage::Instance() {
+  static PointerDataPacketStorage instance;
+  return instance;
+}
+
+Dart_Handle PointerDataPacketStorage::ReadPendingAndClearStatic() {
+  return PointerDataPacketStorage::Instance().ReadPendingAndClear();
+}
+
+int64_t PointerDataPacketStorage::AddPending(const PointerDataPacket& packet) {
+  std::scoped_lock state_lock(mutex_);
+
+  int64_t chosen_id = next_id_++;
+  pending_packets_.emplace(chosen_id, packet.data());
+  return chosen_id;
+}
+
+void PointerDataPacketStorage::RemovePending(int64_t id) {
+  std::scoped_lock state_lock(mutex_);
+
+  pending_packets_.erase(id);
+}
+
+Dart_Handle PointerDataPacketStorage::ReadPendingAndClear() {
+  // should not lock for this long
+  std::scoped_lock state_lock(mutex_);
+
+  // quite expensive copy/resize, only for prototype, should optimize later
+  std::vector<uint8_t> total_buffer;
+  for (auto const& [_, packet] : pending_packets_) {
+    const std::vector<uint8_t>& packet_buffer = packet.data();
+    total_buffer.insert(total_buffer.end(), packet_buffer.begin(),
+                        packet_buffer.end());
+  }
+
+  // clear
+  pending_packets_.clear();
+
+  return tonic::DartByteData::Create(total_buffer.data(), total_buffer.size());
+}
+
 constexpr char kSkiaChannel[] = "flutter/skia";
 constexpr char kSystemChannel[] = "flutter/system";
 constexpr char kTypeKey[] = "type";
@@ -80,6 +121,8 @@ void PerformInitializationTasks(Settings& settings) {
     fml::LogSettings log_settings;
     log_settings.min_log_level =
         settings.verbose_logging ? fml::LOG_INFO : fml::LOG_ERROR;
+    // NOTE HACK if using the following line:
+    //    log_settings.min_log_level = fml::LOG_INFO;
     fml::SetLogSettings(log_settings);
   }
 
@@ -977,20 +1020,126 @@ void Shell::OnPlatformViewDispatchPlatformMessage(
       }));
 }
 
+// NOTE MODIFIED ADD, hacky impl
+// #6124
+class PointerDataPacketDispatchMerger {
+ public:
+  static PointerDataPacketDispatchMerger& Instance() {
+    static PointerDataPacketDispatchMerger instance;
+    return instance;
+  }
+
+  void OnUpstream(std::unique_ptr<PointerDataPacket> packet,
+                  uint64_t flow_id,
+                  const TaskRunners& task_runners,
+                  const fml::WeakPtr<Engine>& weak_engine) {
+    int64_t curr_storage_id =
+        PointerDataPacketStorage::Instance().AddPending(*packet);
+
+    bool should_post_task;
+    {
+      std::scoped_lock state_lock(mutex_);
+
+      pending_storage_ids_.push_back(curr_storage_id);
+      pending_packets_.push_back(std::move(packet));
+
+      should_post_task = !has_pending_post_task_;
+      has_pending_post_task_ = true;
+    }
+
+    if (should_post_task) {
+      task_runners.GetUITaskRunner()->PostTask(fml::MakeCopyable(
+          [this, engine = weak_engine, flow_id = flow_id]() mutable {
+            // TODO make the critical section smaller
+            std::vector<uint8_t> total_buffer;
+            {
+              std::scoped_lock state_lock(mutex_);
+
+              has_pending_post_task_ = false;
+
+              for (const std::unique_ptr<PointerDataPacket>& packet :
+                   pending_packets_) {
+                const std::vector<uint8_t>& packet_buffer = packet->data();
+                total_buffer.insert(total_buffer.end(), packet_buffer.begin(),
+                                    packet_buffer.end());
+              }
+              pending_packets_.clear();
+            }
+            std::unique_ptr<PointerDataPacket> gathered_packet =
+                std::make_unique<PointerDataPacket>(total_buffer);
+
+            if (engine) {
+              engine->DispatchPointerDataPacket(std::move(gathered_packet),
+                                                flow_id);
+            }
+
+            // TODO make the critical section smaller
+            {
+              std::scoped_lock state_lock(mutex_);
+
+              for (int64_t storage_id : pending_storage_ids_) {
+                PointerDataPacketStorage::Instance().RemovePending(storage_id);
+              }
+              pending_storage_ids_.clear();
+            }
+          }));
+    }
+  }
+
+ private:
+  std::mutex mutex_;
+  bool has_pending_post_task_{false};
+  std::vector<std::unique_ptr<PointerDataPacket>> pending_packets_;
+  std::vector<int64_t> pending_storage_ids_;
+};
+
+std::string extract_packet_info(const PointerDataPacket& packet) {
+  std::ostringstream info;
+  info << "[";
+  for (size_t i = 0; i < packet.data().size() / sizeof(PointerData); ++i) {
+    if (i > 0) {
+      info << ",";
+    }
+    const PointerData* item = reinterpret_cast<const PointerData*>(
+        &packet.data()[i * sizeof(PointerData)]);
+    info << "{\"time_stamp\": " << item->time_stamp
+         << ", \"physical_y\": " << item->physical_y << "}";
+  }
+  info << "]";
+  return info.str();
+}
+
 // |PlatformView::Delegate|
 void Shell::OnPlatformViewDispatchPointerDataPacket(
     std::unique_ptr<PointerDataPacket> packet) {
-  TRACE_EVENT0("flutter", "Shell::OnPlatformViewDispatchPointerDataPacket");
+  // NOTE MODIFIED
+  //  TRACE_EVENT0("flutter", "Shell::OnPlatformViewDispatchPointerDataPacket");
+  TRACE_EVENT1("flutter", "Shell::OnPlatformViewDispatchPointerDataPacket",
+               "info", extract_packet_info(*packet).c_str());
+
   TRACE_FLOW_BEGIN("flutter", "PointerEvent", next_pointer_flow_id_);
   FML_DCHECK(is_setup_);
   FML_DCHECK(task_runners_.GetPlatformTaskRunner()->RunsTasksOnCurrentThread());
-  task_runners_.GetUITaskRunner()->PostTask(
-      fml::MakeCopyable([engine = weak_engine_, packet = std::move(packet),
-                         flow_id = next_pointer_flow_id_]() mutable {
-        if (engine) {
-          engine->DispatchPointerDataPacket(std::move(packet), flow_id);
-        }
-      }));
+
+  PointerDataPacketDispatchMerger::Instance().OnUpstream(
+      std::move(packet), next_pointer_flow_id_, task_runners_, weak_engine_);
+
+  // version before #6124
+  //  // NOTE ADD
+  //  int64_t storage_id =
+  //  PointerDataPacketStorage::Instance().AddPending(*packet);
+  //
+  //  task_runners_.GetUITaskRunner()->PostTask(fml::MakeCopyable(
+  //      [engine = weak_engine_, packet = std::move(packet),
+  //       flow_id = next_pointer_flow_id_, storage_id = storage_id]() mutable {
+  //        if (engine) {
+  //          engine->DispatchPointerDataPacket(std::move(packet), flow_id);
+  //        }
+  //
+  //        // NOTE ADD
+  //        PointerDataPacketStorage::Instance().RemovePending(storage_id);
+  //      }));
+
   next_pointer_flow_id_++;
 }
 
@@ -1119,6 +1268,7 @@ const Settings& Shell::OnPlatformViewGetSettings() const {
 // |Animator::Delegate|
 void Shell::OnAnimatorBeginFrame(fml::TimePoint frame_target_time,
                                  uint64_t frame_number) {
+  FML_DLOG(INFO) << "hi Shell::OnAnimatorBeginFrame start";
   FML_DCHECK(is_setup_);
   FML_DCHECK(task_runners_.GetUITaskRunner()->RunsTasksOnCurrentThread());
 
@@ -1130,6 +1280,7 @@ void Shell::OnAnimatorBeginFrame(fml::TimePoint frame_target_time,
   if (engine_) {
     engine_->BeginFrame(frame_target_time, frame_number);
   }
+  FML_DLOG(INFO) << "hi Shell::OnAnimatorBeginFrame end";
 }
 
 // |Animator::Delegate|
@@ -1160,6 +1311,7 @@ void Shell::OnAnimatorUpdateLatestFrameTargetTime(
 
 // |Animator::Delegate|
 void Shell::OnAnimatorDraw(std::shared_ptr<LayerTreePipeline> pipeline) {
+  FML_DLOG(INFO) << "hi Shell::OnAnimatorDraw start";
   FML_DCHECK(is_setup_);
 
   auto discard_callback = [this](flutter::LayerTree& tree) {
@@ -1174,10 +1326,18 @@ void Shell::OnAnimatorDraw(std::shared_ptr<LayerTreePipeline> pipeline) {
        rasterizer = rasterizer_->GetWeakPtr(),
        weak_pipeline = std::weak_ptr<LayerTreePipeline>(pipeline),
        discard_callback = std::move(discard_callback)]() mutable {
+        FML_DLOG(INFO) << "hi Shell::OnAnimatorDraw inside "
+                          "RasterTaskRunner->PostTask callback start";
         if (rasterizer) {
           std::shared_ptr<LayerTreePipeline> pipeline = weak_pipeline.lock();
           if (pipeline) {
+            FML_DLOG(INFO)
+                << "hi Shell::OnAnimatorDraw inside RasterTaskRunner->PostTask "
+                   "callback call rasterizer->Draw start";
             rasterizer->Draw(pipeline, std::move(discard_callback));
+            FML_DLOG(INFO)
+                << "hi Shell::OnAnimatorDraw inside RasterTaskRunner->PostTask "
+                   "callback call rasterizer->Draw end";
           }
 
           if (waiting_for_first_frame.load()) {
@@ -1185,7 +1345,10 @@ void Shell::OnAnimatorDraw(std::shared_ptr<LayerTreePipeline> pipeline) {
             waiting_for_first_frame_condition.notify_all();
           }
         }
+        FML_DLOG(INFO) << "hi Shell::OnAnimatorDraw inside "
+                          "RasterTaskRunner->PostTask callback end";
       }));
+  FML_DLOG(INFO) << "hi Shell::OnAnimatorDraw end";
 }
 
 // |Animator::Delegate|

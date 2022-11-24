@@ -6,6 +6,7 @@
 #define FLUTTER_LIB_UI_WINDOW_POINTER_DATA_PACKET_H_
 
 #include <cstring>
+#include <utility>
 #include <vector>
 
 #include "flutter/fml/macros.h"
@@ -23,6 +24,9 @@ class PointerDataPacket {
   PointerData GetPointerData(size_t i) const;
   size_t GetLength() const;
   const std::vector<uint8_t>& data() const { return data_; }
+
+  // todo: consider std::move etc later (this is just a prototype now)
+  explicit PointerDataPacket(std::vector<uint8_t> data) : data_(data) {}
 
  private:
   std::vector<uint8_t> data_;

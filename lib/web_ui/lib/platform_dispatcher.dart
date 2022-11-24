@@ -74,7 +74,14 @@ abstract class PlatformDispatcher {
 
   ByteData? getPersistentIsolateData() => null;
 
-  void scheduleFrame();
+  void scheduleFrame({Duration? forceDirectlyCallNextVsyncTargetTime});
+
+  static PointerDataPacket pointerDataPacketStorageReadPendingAndClear() {
+    // TODO no-op now
+    return const PointerDataPacket(data: []);
+  }
+
+  bool notifyIdle(Duration deadline) => false;
 
   void render(Scene scene, [FlutterView view]);
 

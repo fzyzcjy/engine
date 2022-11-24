@@ -30,28 +30,50 @@ VsyncWaiterAndroid::~VsyncWaiterAndroid() = default;
 
 // |VsyncWaiter|
 void VsyncWaiterAndroid::AwaitVSync() {
+  //  FML_DLOG(INFO)
+  //      << "hi VsyncWaiterAndroid::AwaitVSync start use_ndk_choreographer_="
+  //      << use_ndk_choreographer_;
   if (use_ndk_choreographer_) {
     auto* weak_this = new std::weak_ptr<VsyncWaiter>(shared_from_this());
     fml::TaskRunner::RunNowOrPostTask(
         task_runners_.GetUITaskRunner(), [weak_this]() {
+          //          FML_DLOG(INFO) << "hi VsyncWaiterAndroid::AwaitVSync
+          //          UITaskRunner "
+          //                            "RunNowOrPostTask start"
+          //                         << " this_thread_id=" << pthread_self();
           AndroidChoreographer::PostFrameCallback(&OnVsyncFromNDK, weak_this);
+          //          FML_DLOG(INFO) << "hi VsyncWaiterAndroid::AwaitVSync
+          //          UITaskRunner "
+          //                            "RunNowOrPostTask end";
         });
   } else {
     // TODO(99798): Remove it when we drop support for API level < 29.
     auto* weak_this = new std::weak_ptr<VsyncWaiter>(shared_from_this());
     jlong java_baton = reinterpret_cast<jlong>(weak_this);
     task_runners_.GetPlatformTaskRunner()->PostTask([java_baton]() {
+      TRACE_EVENT0("flutter", "android-AwaitVSync-in-PlatformTask");
+
+      //      FML_DLOG(INFO) << "hi VsyncWaiterAndroid::AwaitVSync
+      //      PlatformTaskRunner "
+      //                        "PostTask start"
+      //                     << " this_thread_id=" << pthread_self();
       JNIEnv* env = fml::jni::AttachCurrentThread();
       env->CallStaticVoidMethod(g_vsync_waiter_class->obj(),     //
                                 g_async_wait_for_vsync_method_,  //
                                 java_baton                       //
       );
+      //      FML_DLOG(INFO) << "hi VsyncWaiterAndroid::AwaitVSync
+      //      PlatformTaskRunner "
+      //                        "PostTask end";
     });
   }
+  //  FML_DLOG(INFO) << "hi VsyncWaiterAndroid::AwaitVSync end";
 }
 
 // static
 void VsyncWaiterAndroid::OnVsyncFromNDK(int64_t frame_nanos, void* data) {
+  //  FML_DLOG(INFO) << "hi VsyncWaiterAndroid::OnVsyncFromNDK start"
+  //                 << " this_thread_id=" << pthread_self();
   TRACE_EVENT0("flutter", "VSYNC");
 
   auto frame_time = fml::TimePoint::FromEpochDelta(
@@ -64,6 +86,7 @@ void VsyncWaiterAndroid::OnVsyncFromNDK(int64_t frame_nanos, void* data) {
                                       1000000000.0 / g_refresh_rate_);
   auto* weak_this = reinterpret_cast<std::weak_ptr<VsyncWaiter>*>(data);
   ConsumePendingCallback(weak_this, frame_time, target_time);
+  //  FML_DLOG(INFO) << "hi VsyncWaiterAndroid::OnVsyncFromNDK end";
 }
 
 // static
@@ -72,7 +95,8 @@ void VsyncWaiterAndroid::OnVsyncFromJava(JNIEnv* env,
                                          jlong frameDelayNanos,
                                          jlong refreshPeriodNanos,
                                          jlong java_baton) {
-  TRACE_EVENT0("flutter", "VSYNC");
+  //  FML_DLOG(INFO) << "hi VsyncWaiterAndroid::OnVsyncFromJava start";
+  TRACE_EVENT0("flutter", "VSYNC_renamed");  // rename since #6049
 
   auto frame_time =
       fml::TimePoint::Now() - fml::TimeDelta::FromNanoseconds(frameDelayNanos);
@@ -81,6 +105,7 @@ void VsyncWaiterAndroid::OnVsyncFromJava(JNIEnv* env,
 
   auto* weak_this = reinterpret_cast<std::weak_ptr<VsyncWaiter>*>(java_baton);
   ConsumePendingCallback(weak_this, frame_time, target_time);
+  //  FML_DLOG(INFO) << "hi VsyncWaiterAndroid::OnVsyncFromJava end";
 }
 
 // static
@@ -88,6 +113,7 @@ void VsyncWaiterAndroid::ConsumePendingCallback(
     std::weak_ptr<VsyncWaiter>* weak_this,
     fml::TimePoint frame_start_time,
     fml::TimePoint frame_target_time) {
+  //  FML_DLOG(INFO) << "hi VsyncWaiterAndroid::ConsumePendingCallback start";
   auto shared_this = weak_this->lock();
   delete weak_this;
 

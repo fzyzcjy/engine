@@ -5,7 +5,9 @@
 #include "flutter/shell/common/rasterizer.h"
 
 #include <algorithm>
+#include <chrono>
 #include <memory>
+#include <thread>
 #include <utility>
 
 #include "flow/frame_timings.h"
@@ -175,10 +177,12 @@ void Rasterizer::DrawLastLayerTree(
 RasterStatus Rasterizer::Draw(
     const std::shared_ptr<LayerTreePipeline>& pipeline,
     LayerTreeDiscardCallback discard_callback) {
+  FML_DLOG(INFO) << "hi Rasterizer::Draw start";
   TRACE_EVENT0("flutter", "GPURasterizer::Draw");
   if (raster_thread_merger_ &&
       !raster_thread_merger_->IsOnRasterizingThread()) {
     // we yield and let this frame be serviced on the right thread.
+    FML_DLOG(INFO) << "hi Rasterizer::Draw return kYielded";
     return RasterStatus::kYielded;
   }
   FML_DCHECK(delegate_.GetTaskRunners()
@@ -201,6 +205,7 @@ RasterStatus Rasterizer::Draw(
 
   PipelineConsumeResult consume_result = pipeline->Consume(consumer);
   if (consume_result == PipelineConsumeResult::NoneAvailable) {
+    FML_DLOG(INFO) << "hi Rasterizer::Draw return kFailed";
     return RasterStatus::kFailed;
   }
   // if the raster status is to resubmit the frame, we push the frame to the
@@ -246,6 +251,7 @@ RasterStatus Rasterizer::Draw(
       break;
   }
 
+  FML_DLOG(INFO) << "hi Rasterizer::Draw end";
   return raster_status;
 }
 
@@ -363,6 +369,7 @@ fml::Milliseconds Rasterizer::GetFrameBudget() const {
 RasterStatus Rasterizer::DoDraw(
     std::unique_ptr<FrameTimingsRecorder> frame_timings_recorder,
     std::shared_ptr<flutter::LayerTree> layer_tree) {
+  FML_DLOG(INFO) << "hi Rasterizer::DoDraw start";
   TRACE_EVENT_WITH_FRAME_NUMBER(frame_timings_recorder, "flutter",
                                 "Rasterizer::DoDraw");
   FML_DCHECK(delegate_.GetTaskRunners()
@@ -370,6 +377,7 @@ RasterStatus Rasterizer::DoDraw(
                  ->RunsTasksOnCurrentThread());
 
   if (!layer_tree || !surface_) {
+    FML_DLOG(INFO) << "hi Rasterizer::DoDraw early return kFailed";
     return RasterStatus::kFailed;
   }
 
@@ -384,8 +392,11 @@ RasterStatus Rasterizer::DoDraw(
     resubmitted_layer_tree_ = std::move(layer_tree);
     resubmitted_recorder_ = frame_timings_recorder->CloneUntil(
         FrameTimingsRecorder::State::kBuildEnd);
+    FML_DLOG(INFO)
+        << "hi Rasterizer::DoDraw early return since ShouldResubmitFrame";
     return raster_status;
   } else if (raster_status == RasterStatus::kDiscarded) {
+    FML_DLOG(INFO) << "hi Rasterizer::DoDraw early return since kDiscarded";
     return raster_status;
   }
 
@@ -420,6 +431,13 @@ RasterStatus Rasterizer::DoDraw(
     const auto frame_lag =
         (latest_frame_target_time - frame_target_time).ToMillisecondsF();
     const int vsync_transitions_missed = round(frame_lag / frame_budget_millis);
+    FML_DLOG(INFO) << "hi Rasterizer::DoDraw calc SceneDisplayLag"
+                   << " raster_finish_time="
+                   << raster_finish_time.ToEpochDelta().ToMicroseconds()
+                   << " latest_frame_target_time="
+                   << latest_frame_target_time.ToEpochDelta().ToMicroseconds()
+                   << " frame_target_time="
+                   << frame_target_time.ToEpochDelta().ToMicroseconds();
     fml::tracing::TraceEventAsyncComplete(
         "flutter",                    // category
         "SceneDisplayLag",            // name
@@ -454,16 +472,19 @@ RasterStatus Rasterizer::DoDraw(
   if (raster_thread_merger_) {
     if (raster_thread_merger_->DecrementLease() ==
         fml::RasterThreadStatus::kUnmergedNow) {
+      FML_DLOG(INFO) << "hi Rasterizer::DoDraw early return kEnqueuePipeline";
       return RasterStatus::kEnqueuePipeline;
     }
   }
 
+  FML_DLOG(INFO) << "hi Rasterizer::DoDraw end";
   return raster_status;
 }
 
 RasterStatus Rasterizer::DrawToSurface(
     FrameTimingsRecorder& frame_timings_recorder,
     flutter::LayerTree& layer_tree) {
+  FML_DLOG(INFO) << "hi Rasterizer::DrawToSurface start";
   TRACE_EVENT0("flutter", "Rasterizer::DrawToSurface");
   FML_DCHECK(surface_);
 
@@ -480,7 +501,77 @@ RasterStatus Rasterizer::DrawToSurface(
             }));
   }
 
+  FML_DLOG(INFO) << "hi Rasterizer::DrawToSurface end, raster_status="
+                 << static_cast<int>(raster_status);
   return raster_status;
+}
+
+void Rasterizer::MaybeSleepBeforeSubmit(
+    FrameTimingsRecorder& frame_timings_recorder) {
+  // about thresh - #6145
+  static const int MAX_HISTORY = 10;
+  static const int HISTORY_THRESH = 2;
+  // NOTE a bit *more* than enough to allow errors
+  static const fml::TimeDelta SAFE_MARGIN =
+      fml::TimeDelta::FromMicroseconds(500);
+  // TODO assume 60fps in this prototype
+  fml::TimeDelta FRAME_DURATION = fml::TimeDelta::FromMicroseconds(16777);
+
+  fml::TimePoint vsync_target_time =
+      frame_timings_recorder.GetVsyncTargetTime();
+  fml::TimePoint now = fml::TimePoint::Now();
+
+  int curr_latency = static_cast<int>(
+      (now - vsync_target_time + FRAME_DURATION * 2).ToMicroseconds() /
+      FRAME_DURATION.ToMicroseconds());
+
+  // naive heuristics currently
+  int history_larger_latency_count = 0;
+  for (int history_latency : history_latencies_) {
+    if (history_latency > curr_latency) {
+      history_larger_latency_count++;
+    }
+  }
+  bool should_sleep = history_larger_latency_count >= HISTORY_THRESH;
+
+  // very naive (just +1 latency), should be fancier later, e.g. determine from
+  // history
+  int expect_latency = curr_latency + 1;
+  // we want to wake up at the *beginngin* of that vsync interval
+  fml::TimePoint wakeup_time =
+      vsync_target_time + FRAME_DURATION * (expect_latency - 2) + SAFE_MARGIN;
+
+  fml::TimeDelta sleep_duration = wakeup_time - now;
+
+  std::ostringstream info;
+  info << "should_sleep=" << should_sleep    //
+       << ", curr_latency=" << curr_latency  //
+       << ", vsync_target_time"
+       << vsync_target_time.ToEpochDelta().ToMicroseconds()                  //
+       << ", now" << now.ToEpochDelta().ToMicroseconds()                     //
+       << ", wakeup_time" << wakeup_time.ToEpochDelta().ToMicroseconds()     //
+       << ", sleep_duration" << sleep_duration.ToMicroseconds()              //
+       << ", history_larger_latency_count=" << history_larger_latency_count  //
+       << ", history_latencies=";
+  for (int history_latency : history_latencies_) {
+    info << history_latency << ",";
+  }
+  info << ", ";
+  TRACE_EVENT1("flutter", "Rasterizer::MaybeSleepBeforeSubmit", "info",
+               info.str().c_str());
+
+  {
+    history_latencies_.push_back(curr_latency);
+    while (history_latencies_.size() > MAX_HISTORY) {
+      history_latencies_.pop_front();
+    }
+  }
+
+  if (should_sleep) {
+    // TODO may use signals etc, instead of sleeping
+    std::this_thread::sleep_for(
+        std::chrono::microseconds(sleep_duration.ToMicroseconds()));
+  }
 }
 
 /// Unsafe because it assumes we have access to the GPU which isn't the case
@@ -508,7 +599,11 @@ RasterStatus Rasterizer::DrawToSurfaceUnsafe(
   //
   // Deleting a surface also clears the GL context. Therefore, acquire the
   // frame after calling `BeginFrame` as this operation resets the GL context.
-  auto frame = surface_->AcquireFrame(layer_tree.frame_size());
+  auto frame = surface_->AcquireFrame(
+      layer_tree.frame_size(), [this, &frame_timings_recorder] {
+        // NOTE MODIFIED ADD
+        MaybeSleepBeforeSubmit(frame_timings_recorder);
+      });
   if (frame == nullptr) {
     return RasterStatus::kFailed;
   }
