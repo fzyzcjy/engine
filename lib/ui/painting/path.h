@@ -109,6 +109,8 @@ class CanvasPath : public RefCountedDartWrappable<CanvasPath> {
   void shift(Dart_Handle path_handle, double dx, double dy);
 
   void transform(Dart_Handle path_handle, Dart_Handle matrix4_handle);
+  tonic::Uint8List serialize();
+  void deserialize(tonic::Uint8List bytes);
 
   tonic::Float32List getBounds();
   bool op(CanvasPath* path1, CanvasPath* path2, int operation);

@@ -1109,6 +1109,12 @@ class Paint {
   @pragma('vm:entry-point')
   final ByteData _data = ByteData(_kDataByteCount);
 
+  // HACK
+  Paint.raw(ByteData data) {
+    _data.buffer.asUint8List().setRange(0, _kDataByteCount, data.buffer.asUint8List());
+  }
+  ByteData get data => _data;
+
   static const int _kIsAntiAliasIndex = 0;
   static const int _kColorIndex = 1;
   static const int _kBlendModeIndex = 2;
@@ -2838,6 +2844,10 @@ abstract class Path {
   // see https://skia.org/user/api/SkPath_Reference#SkPath_getBounds
   Rect getBounds();
 
+  Uint8List serialize();
+
+  void deserialize(Uint8List bytes);
+
   /// Combines the two paths according to the manner specified by the given
   /// `operation`.
   ///
@@ -3129,6 +3139,16 @@ base class _NativePath extends NativeFieldWrapperClass1 implements Path {
 
   @Native<Bool Function(Pointer<Void>, Pointer<Void>, Pointer<Void>, Int32)>(symbol: 'Path::op')
   external bool _op(_NativePath path1, _NativePath path2, int operation);
+
+  Uint8List serialize() => _serialize();
+
+  @Native<Handle Function(Pointer<Void>)>(symbol: 'Path::serialize')
+  external Uint8List _serialize();
+
+  void deserialize(Uint8List bytes) => _deserialize(bytes);
+
+  @Native<Void Function(Pointer<Void>, Handle)>(symbol: 'Path::deserialize')
+  external void _deserialize(Uint8List bytes);
 
   @override
   PathMetrics computeMetrics({bool forceClosed = false}) {

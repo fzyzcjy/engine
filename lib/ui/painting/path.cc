@@ -305,6 +305,17 @@ void CanvasPath::transform(Dart_Handle path_handle,
   mutable_path().transform(sk_matrix, &other_mutable_path);
 }
 
+tonic::Uint8List CanvasPath::serialize() {
+  size_t size = path().writeToMemory(nullptr);
+  tonic::Uint8List data(Dart_NewTypedData(Dart_TypedData_kUint8, size));
+  path().writeToMemory((void*)data.data());
+  return data;
+}
+
+void CanvasPath::deserialize(tonic::Uint8List bytes) {
+  mutable_path().readFromMemory(bytes.data(), bytes.num_elements());
+}
+
 tonic::Float32List CanvasPath::getBounds() {
   tonic::Float32List rect(Dart_NewTypedData(Dart_TypedData_kFloat32, 4));
   const SkRect& bounds = path().getBounds();
